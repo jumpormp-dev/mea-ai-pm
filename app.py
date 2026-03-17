@@ -3,8 +3,8 @@ import joblib
 import pandas as pd
 import numpy as np
 
-# 1. โหลดโมเดล (ต้องมั่นใจว่าไฟล์ pkl อยู่ในโฟลเดอร์เดียวกันบน GitHub)
-@st.cache_resource # ช่วยให้โหลดโมเดลเร็วขึ้น
+# 1. โหลดโมเดล
+@st.cache_resource
 def load_my_model():
     return joblib.load('pdm_model.pkl')
 
@@ -24,22 +24,22 @@ vibration = st.sidebar.slider("ความสั่นสะเทือน (mm
 
 # 4. ปุ่มคำนวณ
 if st.button("วิเคราะห์ความเสี่ยง"):
-# สร้างตารางข้อมูลให้ตรงกับหัวตารางใน Excel เป๊ะๆ
-    input_df = pd.DataFrame([[temp, load, oil, vibration]], 
-                            columns=['Temp (°C)', 'Load (%)', 'Oil Level (%)', 'Vibration (mm/s)'])
+    # เตรียมข้อมูลเป็น Array (ตัดปัญหาเรื่องชื่อคอลัมน์ไม่ตรง)
+    features = np.array([[temp, load, oil, vibration]])
     
     # พยากรณ์
-    prediction = model.predict(input_df)[0]
-    prob = model.predict_proba(input_df)[0][1]
+    prediction = model.predict(features)[0]
+    prob = model.predict_proba(features)[0][1]
 
     # 5. แสดงผลลัพธ์
     st.subheader("ผลการวิเคราะห์:")
     if prediction == 1:
         st.error(f"⚠️ สถานะ: อันตราย! พบความเสี่ยงสูง (โอกาสเสีย {prob*100:.2f}%)")
-        st.write("คำแนะนำ: ควรส่งช่างตรวจเช็คอุปกรณ์ทันที")
+        st.markdown("### **คำแนะนำ:** ควรส่งทีมช่างเข้าตรวจสอบอุปกรณ์ทันที")
     else:
         st.success(f"✅ สถานะ: ปกติ (โอกาสเสีย {prob*100:.2f}%)")
-        st.write("คำแนะนำ: บำรุงรักษาตามรอบปกติ")
+        st.markdown("### **คำแนะนำ:** บำรุงรักษาตามรอบปกติ")
 
-    # โชว์กราฟ Gauge หรือความสำคัญ (Optional)
+    # แสดงแถบความเสี่ยง
+    st.write("ระดับความเสี่ยงพิจารณาจาก AI:")
     st.progress(prob)
