@@ -24,9 +24,9 @@ vibration = st.sidebar.slider("ความสั่นสะเทือน (mm
 
 # 4. ปุ่มคำนวณ
 if st.button("วิเคราะห์ความเสี่ยง"):
-    # ทำข้อมูลให้เป็นตารางเหมือนตอนเทรน
+# สร้างตารางข้อมูลให้ตรงกับหัวตารางใน Excel เป๊ะๆ
     input_df = pd.DataFrame([[temp, load, oil, vibration]], 
-                            columns=['temp', 'load_pct', 'oil_level', 'vibration'])
+                            columns=['Temp (°C)', 'Load (%)', 'Oil Level (%)', 'Vibration (mm/s)'])
     
     # พยากรณ์
     prediction = model.predict(input_df)[0]
