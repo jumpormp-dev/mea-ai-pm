@@ -4,5 +4,5 @@ joblib
 scikit-learn
 plotly
 openpyxl
-opencv-python-headless
-pytesseract
+beautifulsoup4
+lxml
