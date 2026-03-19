@@ -5,94 +5,68 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime
 
-# 1. โหลดโมเดล AI (8 ตัวแปร)
+# --- ส่วนโหลดโมเดล ---
 @st.cache_resource
 def load_my_model():
     return joblib.load('mea_pm_ai_model.pkl')
 
-model = load_my_model()
+try:
+    model = load_my_model()
+except:
+    st.error("❌ ไม่พบไฟล์โมเดล 'mea_pm_ai_model.pkl' บน GitHub")
 
 st.set_page_config(page_title="MEA Smart PM Planner", layout="wide")
-st.title("⚡ MEA Smart Maintenance Planner (Integrated AI)")
-st.write("ระบบวางแผน PM อัจฉริยะ: รวมฐานข้อมูลทรัพย์สิน สถิติการขัดข้อง และผลสำรวจ Acoustic")
+st.title("⚡ MEA Smart Maintenance & PM Planner")
+st.write("ระบบวางแผนบำรุงรักษาอัจฉริยะ (Asset Database + Web Stats + Acoustic Survey)")
 
-# --- ส่วนที่ 1: ฐานข้อมูลทรัพย์สิน (Asset Database) ---
-# ในสถานการณ์จริง ส่วนนี้จะดึงจาก GIS หรือ SAP ของ MEA
-if 'asset_db' not in st.session_state:
-    st.session_state.asset_db = pd.DataFrame({
-        'Transformer_ID': ['TR-BK-001', 'TR-BK-002', 'TR-BK-003', 'TR-BK-004', 'TR-BK-005'],
-        'Area': ['Bangkok', 'Bangkok', 'Nonthaburi', 'Samut Prakan', 'Bangkok'],
-        'Age (Years)': [5, 18, 12, 22, 8],
-        'Last_PM': ['2025-01-10', '2024-05-20', '2024-11-15', '2023-08-10', '2025-02-01']
-    })
+# --- 1. การดึงข้อมูลจากเว็บภายนอก (Simulation 10.99.1.36) ---
+st.sidebar.header("📂 Data Integration")
+if st.sidebar.button("🔗 ดึงข้อมูลสถิติจาก 10.99.1.36"):
+    # ใน LAN จริงจะใช้ pd.read_html("http://10.99.1.36/...")
+    st.session_state.web_trips = 4.5 # สมมติค่าจากเว็บ
+    st.sidebar.success(f"ดึงข้อมูลสำเร็จ: {st.session_state.web_trips} ครั้ง/ปี")
 
-# --- ส่วนที่ 2: การนำเข้าข้อมูลสถิติ และ ผลสำรวจ (Data Input) ---
-st.sidebar.header("📥 Data Integration")
-selected_id = st.sidebar.selectbox("เลือกหม้อแปลงที่ต้องการวิเคราะห์:", st.session_state.asset_db['Transformer_ID'])
+# --- 2. ข้อมูลจากการสำรวจหน้างาน (Survey) ---
+st.sidebar.subheader("🔍 Field Survey Input")
+s_id = st.sidebar.text_input("รหัสหม้อแปลง", "TR-MEA-001")
+f1 = st.sidebar.slider("1. Temp (°C)", 30, 110, 60)
+f2 = st.sidebar.slider("2. Load (%)", 0, 150, 80)
+f3 = st.sidebar.slider("3. Oil Level (%)", 0, 100, 95)
+f4 = st.sidebar.number_input("4. Vibration (mm/s)", 0.0, 10.0, 1.5)
+f5 = st.sidebar.number_input("5. Age (Years)", 1, 40, 15)
+f6 = st.sidebar.slider("6. Humidity (%)", 0, 100, 55)
+f7 = st.sidebar.number_input("7. Acoustic (dB)", 30.0, 110.0, 45.0)
+f8 = st.sidebar.number_input("8. Peak Freq (Hz)", 1000, 100000, 20000)
 
-# ดึงข้อมูลพื้นฐานจาก DB มาโชว์
-asset_info = st.session_state.asset_db[st.session_state.asset_db['Transformer_ID'] == selected_id].iloc[0]
-
-st.sidebar.divider()
-st.sidebar.subheader("🌐 สถิติจากหน่วยงาน (Web Stats)")
-stat_trips = st.sidebar.number_input("จำนวนครั้งที่สวิตช์ตก/ไฟดับ (ปีล่าสุด)", 0, 20, 2)
-humidity = st.sidebar.slider("ความชื้นสะสมในพื้นที่ (%)", 30, 90, 55)
-
-st.sidebar.subheader("🔍 ข้อมูลสำรวจหน้างาน (Survey)")
-temp = st.sidebar.number_input("อุณหภูมิที่วัดได้ (°C)", 30.0, 110.0, 55.0)
-load_pct = st.sidebar.slider("โหลดขณะตรวจวัด (%)", 0, 120, 70)
-oil_level = st.sidebar.slider("ระดับน้ำมัน (%)", 0, 100, 95)
-vib = st.sidebar.number_input("ความสั่นสะเทือน (mm/s)", 0.0, 10.0, 1.2)
-
-st.sidebar.subheader("🔊 Acoustic Camera Results")
-ac_db = st.sidebar.number_input("ค่าความดังเสียง (dB)", 30.0, 110.0, 45.0)
-ac_hz = st.sidebar.number_input("ความถี่ Peak (Hz)", 1000, 100000, 20000)
-
-# --- ส่วนที่ 3: การวิเคราะห์และแสดงผล (AI Analysis) ---
-if st.sidebar.button("🤖 ประมวลผลแผน PM"):
-    # เตรียม Features 8 ตัวแปรตามลำดับโมเดล
-    # [Temp, Load, Oil, Vib, Age, Humidity, Acoustic_dB, Peak_Freq]
-    features = np.array([[temp, load_pct, oil_level, vib, asset_info['Age (Years)'], humidity, ac_db, ac_hz]])
+# --- 3. ประมวลผลและวางแผน ---
+if st.sidebar.button("🤖 AI วิเคราะห์แผน PM"):
+    input_data = np.array([[f1, f2, f3, f4, f5, f6, f7, f8]])
+    prob = model.predict_proba(input_data)[0][1]
     
-    prob = model.predict_proba(features)[0][1]
-    risk_level = "🔴 CRITICAL" if prob > 0.8 else "🟡 WARNING" if prob > 0.4 else "🟢 NORMAL"
+    st.header(f"📊 ผลการประเมินสุขภาพ: {s_id}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Risk Score (AI)", f"{prob*100:.1f}%")
+    c2.metric("สถิติไฟดับในพื้นที่", f"{st.session_state.get('web_trips', 'N/A')} ครั้ง/ปี")
+    status = "🔴 CRITICAL" if prob > 0.7 else "🟡 WATCH" if prob > 0.4 else "🟢 STABLE"
+    c3.subheader(status)
 
-    # แสดงผล Dashboard
-    st.subheader(f"📊 รายงานการวิเคราะห์: {selected_id} ({asset_info['Area']})")
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("คะแนนความเสี่ยง (AI)", f"{prob*100:.1f}%")
-    col2.metric("สถานะแนะนำ", risk_level)
-    col3.metric("อายุการใช้งาน", f"{asset_info['Age (Years)']} ปี")
-
-    # กราฟ Radar Chart แสดงจุดที่ต้องเฝ้าระวัง
-    st.write("### วิเคราะห์ปัจจัยรายด้าน (Multi-Factor Analysis)")
-    radar_data = pd.DataFrame({
-        'Factor': ['ความร้อน', 'ภาระไฟฟ้า', 'ความเก่า', 'สถิติไฟดับ', 'เสียง Acoustic'],
-        'Score': [temp/100, load_pct/100, asset_info['Age (Years)']/25, stat_trips/10, ac_db/100]
+    # กราฟ Radar
+    radar_df = pd.DataFrame({
+        'Factor': ['ความร้อน', 'โหลด', 'อายุอุปกรณ์', 'สถิติไฟดับ', 'เสียง Acoustic'],
+        'Score': [f1/110, f2/150, f5/40, st.session_state.get('web_trips', 2)/10, f7/110]
     })
-    fig_radar = px.line_polar(radar_data, r='Score', theta='Factor', line_close=True, range_r=[0,1])
-    fig_radar.update_traces(fill='toself')
-    st.plotly_chart(fig_radar, use_container_width=True)
+    fig = px.line_polar(radar_df, r='Score', theta='Factor', line_close=True)
+    fig.update_traces(fill='toself', fillcolor='rgba(255, 0, 0, 0.2)')
+    st.plotly_chart(fig)
 
-    # สรุปแผน PM (Decision Support)
+    # สรุปแผนงาน PM
     st.divider()
-    st.subheader("📝 แผนงาน PM ที่แนะนำ (Action Plan)")
-    
-    if risk_level == "🔴 CRITICAL":
-        st.error(f"**เหตุผล:** สถิติการขัดข้องสูง ({stat_trips} ครั้ง) ร่วมกับค่า Acoustic ({ac_db} dB) บ่งบอกถึงความเสียหายภายใน")
-        st.markdown("- **Action:** เลื่อนกำหนด PM มาเป็นด่วนที่สุด (ภายใน 48 ชม.)")
-        st.markdown("- **Resource:** ต้องใช้รถ Mobile Unit และทีมช่างเทคนิคพิเศษ")
-    elif risk_level == "🟡 WARNING":
-        st.warning(f"**เหตุผล:** อุปกรณ์เริ่มมีอายุ ({asset_info['Age (Years)']} ปี) และเริ่มตรวจพบเสียงผิดปกติ")
-        st.markdown("- **Action:** บรรจุเข้าแผน PM รายไตรมาสถัดไป")
-        st.markdown("- **Resource:** ตรวจสอบซ้ำด้วยการเก็บตัวอย่างน้ำมัน (DGA)")
+    st.subheader("📝 แผนการบำรุงรักษาที่แนะนำ (Action Plan)")
+    if status == "🔴 CRITICAL":
+        st.error(f"**เหตุผล:** พบสัญญาณเสียง Acoustic ผิดปกติ ({f7} dB) ร่วมกับความร้อนสูง")
+        st.markdown("- **Action:** ดำเนินการ PM ด่วนที่สุดภายใน 72 ชั่วโมง")
     else:
-        st.success("**เหตุผล:** ปัจจัยทุกอย่างยังอยู่ในเกณฑ์มาตรฐาน")
-        st.markdown("- **Action:** ดำเนินการตามรอบ PM ปกติ (Last PM: " + asset_info['Last_PM'] + ")")
+        st.success("**Action:** ดำเนินการตามรอบปกติ (Annual Maintenance)")
 
 else:
-    # หน้าแรกตอนยังไม่ได้กดวิเคราะห์
-    st.info("👈 กรุณาระบุรหัสหม้อแปลงและกรอกข้อมูลสถิติ/ผลสำรวจหน้างานจากแถบเมนูด้านซ้าย")
-    st.write("### รายการหม้อแปลงในฐานข้อมูลเขตพื้นที่")
-    st.table(st.session_state.asset_db)
+    st.info("💡 กรุณากรอกข้อมูลสำรวจและกดปุ่มวิเคราะห์ด้านซ้ายเพื่อเริ่มงาน")
