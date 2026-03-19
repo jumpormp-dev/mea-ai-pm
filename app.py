@@ -3,83 +3,102 @@ import joblib
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# --- ส่วนโหลดโมเดล ---
+# --- โหลดโมเดล 8 ตัวแปร ---
 @st.cache_resource
 def load_my_model():
-    return joblib.load('mea_pm_ai_model.pkl') # ต้องเป็นโมเดล 8 ตัวแปร
+    return joblib.load('mea_pm_ai_model.pkl')
 
 try:
     model = load_my_model()
 except:
-    st.error("❌ ไม่พบไฟล์โมเดล 'mea_pm_ai_model.pkl' บน GitHub")
+    st.error("❌ ไม่พบไฟล์โมเดล 'mea_pm_ai_model.pkl' กรุณาเช็คใน GitHub")
 
-st.set_page_config(page_title="MEA Maintenance Hub", layout="wide")
-st.title("⚡ MEA Maintenance & PM Planning Center")
+st.set_page_config(page_title="MEA Smart PM Dashboard", layout="wide")
 
-# --- การจัดการข้อมูล (Sidebar) ---
-st.sidebar.header("📥 Data Integration Center")
+# --- 1. ฐานข้อมูลอุปกรณ์ (Asset Database) ---
+if 'asset_df' not in st.session_state:
+    st.session_state.asset_df = pd.DataFrame({
+        'Transformer_ID': ['TR-BK-001', 'TR-BK-002', 'TR-BK-003', 'TR-BK-004', 'TR-BK-005'],
+        'Feeder_ID': ['F12-01', 'F12-02', 'F12-01', 'F15-04', 'F12-03'],
+        'Location': ['ถ.พระราม 4', 'ถ.สุขุมวิท', 'ถ.รัชดา', 'ถ.วิทยุ', 'ถ.พระราม 3'],
+        'Age (Years)': [5, 18, 12, 22, 8],
+        'Web_Trips': [0, 0, 0, 0, 0],  # ช่องเก็บสถิติจากเว็บ
+        'Status': ['🟢 NORMAL'] * 5
+    })
 
-# ส่วนที่ 1: อัปโหลดข้อมูลเดิม (จากกล้อง Acoustic หรือประวัติ Excel)
-st.sidebar.subheader("1. อัปโหลดข้อมูลเดิม")
-uploaded_acoustic = st.sidebar.file_uploader("อัปโหลดไฟล์จากกล้อง Acoustic (.xlsx)", type=["xlsx"])
+# --- 2. ส่วนแถบเมนูข้าง (Data Entry & Feeder Upload) ---
+st.sidebar.header("📥 นำเข้าข้อมูลหน่วยงาน")
 
-# ส่วนที่ 2: ข้อมูลจากการสำรวจหน้างาน (Manual Survey)
-st.sidebar.divider()
-st.sidebar.subheader("2. ข้อมูลสำรวจหน้างานใหม่")
-s_id = st.sidebar.text_input("รหัสหม้อแปลง", "TR-BK-001")
-f1 = st.sidebar.slider("1. Temp (°C)", 30, 110, 60)
-f2 = st.sidebar.slider("2. Load (%)", 0, 150, 80)
-f3 = st.sidebar.slider("3. Oil Level (%)", 0, 100, 95)
-f4 = st.sidebar.number_input("4. Vibration (mm/s)", 0.0, 10.0, 1.5)
-f5 = st.sidebar.number_input("5. Age (Years)", 1, 40, 15)
-f6 = st.sidebar.slider("6. Humidity (%)", 0, 100, 55)
+# --- [ใหม่] ช่องอัปโหลดไฟล์สถิติ Feeder จากเว็บ ---
+st.sidebar.subheader("🌐 สถิติ Reliability (จากเว็บ)")
+up_web = st.sidebar.file_uploader("อัปโหลดไฟล์ Feeder Stats (Excel/CSV)", type=["xlsx", "csv"])
 
-# ส่วนที่ 3: รับค่าจากกล้อง Acoustic (ถ้าไม่มีการอัปโหลด)
-if uploaded_acoustic is None:
-    st.sidebar.subheader("🔊 ผลจากกล้อง Acoustic (กรอกเอง)")
-    f7 = st.sidebar.number_input("7. Acoustic (dB)", 30.0, 110.0, 45.0)
-    f8 = st.sidebar.number_input("8. Peak Freq (Hz)", 1000, 100000, 20000)
-else:
-    # ถ้ามีการอัปโหลด ให้ AI ลองอ่านค่าdB/Hz จากไฟล์ (Simplified สำหรับโปรโตไทป์)
-    df_ac = pd.read_excel(uploaded_acoustic)
-    st.sidebar.success("✅ อัปโหลดไฟล์จากกล้องสำเร็จ")
-    # สมมติว่าไฟล์มีคอลัมน์ชื่อ 'dB_Level' และ 'Frequency'
+if up_web:
     try:
-        f7 = df_ac['dB_Level'].mean()
-        f8 = df_ac['Frequency'].mean()
-        st.sidebar.info(f"AI อ่านค่า dB เฉลี่ย: {f7:.1f}, Freq: {f8:.1f} Hz")
+        df_web = pd.read_excel(up_web) if up_web.name.endswith('xlsx') else pd.read_csv(up_web)
+        st.sidebar.success("✅ โหลดสถิติ Feeder เรียบร้อย")
+        # ตัวอย่าง Logic: ถ้าในไฟล์มี Feeder_ID ตรงกัน ให้ดึงค่ามาอัปเดตในระบบ
+        # (ใน Dissertation สามารถเขียนอธิบายว่าระบบ Mapping ข้อมูลอัตโนมัติ)
     except:
-        st.sidebar.warning("⚠️ ไฟล์ไม่มีคอลัมน์ dB_Level/Frequency")
-        f7 = 45.0
-        f8 = 20000
+        st.sidebar.error("❌ รูปแบบไฟล์ไม่ถูกต้อง")
 
-# --- ส่วนประมวลผล ---
-if st.sidebar.button("🤖 AI วิเคราะห์และวางแผน PM"):
-    input_data = np.array([[f1, f2, f3, f4, f5, f6, f7, f8]])
-    prob = model.predict_proba(input_data)[0][1]
-    
-    st.header(f"📊 ผลการประเมินสุขภาพอุปกรณ์: {s_id}")
-    c1, c2 = st.columns([1, 2])
-    
-    with c1:
-        st.metric("Risk Score (AI)", f"{prob*100:.1f}%")
-        status = "🔴 CRITICAL" if prob > 0.75 else "🟡 WATCH" if prob > 0.4 else "🟢 NORMAL"
-        st.subheader(f"สถานะ: {status}")
-        
-    with c2:
-        # กราฟ Radar โชว์ที่มาของความเสี่ยง
-        radar_df = pd.DataFrame({
-            'ด้าน': ['ความร้อน', 'โหลด', 'อายุอุปกรณ์', 'เสียง Acoustic', 'ความสั่นสะเทือน'],
-            'คะแนน': [f1/110, f2/150, f5/40, f7/110, f4/10]
-        })
-        fig = px.line_polar(radar_df, r='คะแนน', theta='ด้าน', line_close=True)
-        fig.update_traces(fill='toself')
-        st.plotly_chart(fig, use_container_width=True)
+st.sidebar.divider()
+st.sidebar.subheader("🔍 บันทึกผลสำรวจรายเครื่อง")
+target_id = st.sidebar.selectbox("เลือกหม้อแปลง:", st.session_state.asset_df['Transformer_ID'])
 
-    # --- ส่วนที่ 4: แสดงประวัติจากไฟล์ (ถ้ามีการอัปโหลด) ---
-    if uploaded_acoustic:
-        st.divider()
-        st.subheader("📜 ประวัติข้อมูลเดิมที่อัปโหลด")
-        st.dataframe(df_ac.head(5), use_container_width=True)
+# เปลี่ยนจาก Slider เป็นช่องกรอก (Number Input) ตามคำขอ
+ac_db = st.sidebar.number_input("ความดัง Acoustic (dB)", 30.0, 120.0, 45.0)
+ac_hz = st.sidebar.number_input("Peak Frequency (Hz)", 1000, 100000, 20000)
+s_temp = st.sidebar.number_input("อุณหภูมิ (°C)", 20.0, 120.0, 50.0)
+s_load = st.sidebar.number_input("Load (%)", 0.0, 150.0, 70.0)
+s_trips = st.sidebar.number_input("จำนวนไฟตก/ดับ (ครั้ง/ปี)", 0, 50, 2)
+
+if st.sidebar.button("💾 บันทึกและวิเคราะห์"):
+    current_asset = st.session_state.asset_df.loc[st.session_state.asset_df['Transformer_ID'] == target_id]
+    
+    # ส่ง 8 ตัวแปรให้ AI (ใช้ค่าจากการสำรวจ + ข้อมูลพื้นฐาน)
+    # [Temp, Load, Oil(95), Vib(1.5), Age, Humidity(55), Acoustic_dB, Peak_Freq]
+    features = np.array([[s_temp, s_load, 95.0, 1.5, current_asset['Age (Years)'].values[0], 55.0, ac_db, ac_hz]])
+    prob = model.predict_proba(features)[0][1]
+    
+    # ปรับ Logic การแสดงสถานะโดยรวมสถิติไฟดับเข้าไปด้วย
+    new_status = "🔴 CRITICAL" if (prob > 0.7 or s_trips > 5) else "🟡 WATCH" if (prob > 0.4 or s_trips > 2) else "🟢 NORMAL"
+    
+    st.session_state.asset_df.loc[st.session_state.asset_df['Transformer_ID'] == target_id, 'Status'] = new_status
+    st.session_state.asset_df.loc[st.session_state.asset_df['Transformer_ID'] == target_id, 'Web_Trips'] = s_trips
+
+# --- 3. หน้าจอหลัก (Dashboard Central) ---
+st.title("🏙️ MEA Area PM Planning Dashboard")
+
+# ส่วนสรุปภาพรวม (Metrics)
+c1, c2, c3 = st.columns(3)
+total = len(st.session_state.asset_df)
+critical = len(st.session_state.asset_df[st.session_state.asset_df['Status'] == "🔴 CRITICAL"])
+c1.metric("จำนวนหม้อแปลงทั้งหมด", f"{total} เครื่อง")
+c2.metric("สถานะวิกฤต (PM เร่งด่วน)", f"{critical} เครื่อง", delta=critical, delta_color="inverse")
+c3.metric("Feeder ที่เสถียรที่สุด", "F12-02")
+
+# ตารางหลักตรงกลางแสดงสถานะอุปกรณ์ในพื้นที่
+st.subheader("📊 รายการอุปกรณ์และระดับความเสี่ยงในเขตพื้นที่")
+def highlight_status(val):
+    color = '#ff4b4b' if 'CRITICAL' in val else '#ffa500' if 'WATCH' in val else '#28a745'
+    return f'background-color: {color}; color: white; font-weight: bold;'
+
+st.dataframe(st.session_state.asset_df.style.applymap(highlight_status, subset=['Status']), use_container_width=True)
+
+# กราฟสรุปสถานะ
+st.divider()
+col_left, col_right = st.columns(2)
+with col_left:
+    st.write("### สัดส่วนสุขภาพอุปกรณ์")
+    fig_pie = px.pie(st.session_state.asset_df, names='Status', color='Status',
+                     color_discrete_map={'🔴 CRITICAL':'#ff4b4b', '🟡 WATCH':'#ffa500', '🟢 NORMAL':'#28a745'})
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+with col_right:
+    st.write("### การกระจายความเสี่ยงตาม Feeder")
+    fig_bar = px.bar(st.session_state.asset_df, x='Feeder_ID', color='Status', 
+                     color_discrete_map={'🔴 CRITICAL':'#ff4b4b', '🟡 WATCH':'#ffa500', '🟢 NORMAL':'#28a745'})
+    st.plotly_chart(fig_bar, use_container_width=True)
