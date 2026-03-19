@@ -3,7 +3,6 @@ import joblib
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import plotly.express as px # ต้องเพิ่ม library นี้ใน requirements.txt
 
 # 1. โหลดโมเดล
 @st.cache_resource
@@ -12,11 +11,12 @@ def load_my_model():
 
 model = load_my_model()
 
-st.set_page_config(page_title="MEA AI-Powered Predictive Maintenance", layout="wide")
-st.title("⚡ MEA Smart maintenance AI (MSIA)")
+st.set_page_config(page_title="MEA Asset Health Dashboard", layout="wide")
+st.title("⚡ MEA Smart Maintenance Dashboard")
 st.write(f"ข้อมูล ณ วันที่: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
 # 2. จำลองรายการอุปกรณ์ (Asset Inventory)
+# ในงานจริงส่วนนี้จะดึงจากฐานข้อมูล SAP หรือ GIS ของ MEA
 assets = [f"Transformer-{i:03d}" for i in range(1, 11)] # จำลอง 10 เครื่อง
 
 # 3. สร้างข้อมูลจำลองสำหรับแต่ละอุปกรณ์
@@ -58,42 +58,15 @@ for asset in assets:
 df_display = pd.DataFrame(data_list)
 
 # 4. แสดงผลลัพธ์เป็นตาราง
+# ใช้สีแยกสถานะเพื่อความชัดเจน
 def color_status(val):
     color = 'red' if 'Critical' in val else 'orange' if 'Warning' in val else 'green'
     return f'color: {color}; font-weight: bold'
 
-st.subheader("📋 รายการตรวจสอบสุขภาพหม้อแปลงไฟฟ้า (MEA Area Overview)")
+st.subheader("📋 รายการตรวจสอบสุขภาพหม้อแปลงไฟฟ้า")
 st.table(df_display.style.applymap(color_status, subset=['Status']))
 
-# 5. ฟีเจอร์ AI Insights (ส่วนที่เพิ่มใหม่)
-st.divider()
-st.subheader("💡 AI Insights & Decision Support")
-
-c1, c2 = st.columns(2)
-
-with c1:
-    # แสดง Feature Importance
-    st.write("📊 ตัวแปรที่มีผลต่อการตัดสินใจของ AI (MEA Transformer Model)")
-    # ดึงค่าความสำคัญจากโมเดลจริง
-    importances = pd.Series(model.feature_importances_, index=['Temp', 'Load', 'Oil', 'Vibration'])
-    fig = px.bar(importances, orientation='h', labels={'value': 'Importance score'})
-    st.plotly_chart(fig, use_container_width=True)
-
-with c2:
-    # แสดงโอกาสเสียรายเดือน
-    st.write("📅 พยากรณ์โอกาสการเกิดเหตุขัดข้อง (Future Probability)")
-    # จำลองโอกาสเสียรายเดือน (ยิ่งเครื่อง Critical โอกาสเสียยิ่งเพิ่มเร็ว)
-    critical_assets = df_display[df_display['Status'] == "🔴 Critical"]
-    if not critical_assets.empty:
-        selected_asset = st.selectbox("เลือกอุปกรณ์ที่เสี่ยงสูง:", critical_assets['Asset ID'].tolist())
-        months = ["Month-1", "Month-2", "Month-3", "Month-4", "Month-5", "Month-6"]
-        prob_values = np.linspace(0.85, 0.99, 6) # สมมติว่าโอกาสเสียเพิ่มขึ้นเรื่อยๆ
-        fig = px.line(x=months, y=prob_values, labels={'x': 'Month', 'y': 'Fail Probability'})
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.write("✅ ไม่พบอุปกรณ์เสี่ยงสูงในขณะนี้")
-
-# 6. สรุปภาพรวม (Summary Cards)
+# 5. สรุปภาพรวม (Summary Cards)
 st.divider()
 c1, c2, c3 = st.columns(3)
 c1.metric("จำนวนอุปกรณ์ทั้งหมด", len(assets))
