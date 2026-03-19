@@ -1,7 +1,7 @@
 import streamlit as st
 import joblib
-import pandas as pd
 import numpy as np
+import time
 
 # 1. โหลดโมเดล
 @st.cache_resource
@@ -10,36 +10,52 @@ def load_my_model():
 
 model = load_my_model()
 
-# 2. ตั้งค่าหน้าตาเว็บ
-st.set_page_config(page_title="AI PM Prototype", page_icon="⚡")
-st.title("⚡ AI Predictive Maintenance Prototype")
-st.write("ระบบพยากรณ์ความเสี่ยงอุปกรณ์ไฟฟ้า (MEA Case Study)")
+st.set_page_config(page_title="MEA Real-time AI Monitoring", layout="wide")
+st.title("⚡ MEA Smart Incident AI (MSIA) - Real-time Monitoring")
 
-# 3. ส่วนรับข้อมูล (Sidebar)
-st.sidebar.header("Input Sensor Data")
-temp = st.sidebar.slider("อุณหภูมิ (°C)", 30.0, 120.0, 50.0)
-load = st.sidebar.slider("โหลด (%)", 0, 120, 60)
-oil = st.sidebar.slider("ระดับน้ำมัน (%)", 0, 100, 90)
-vibration = st.sidebar.slider("ความสั่นสะเทือน (mm/s)", 0.0, 10.0, 1.5)
+# 2. ส่วนจำลองสถานะ (Auto-running)
+if "running" not in st.session_state:
+    st.session_state.running = False
 
-# 4. ปุ่มคำนวณ
-if st.button("วิเคราะห์ความเสี่ยง"):
-    # เตรียมข้อมูลเป็น Array (ตัดปัญหาเรื่องชื่อคอลัมน์ไม่ตรง)
-    features = np.array([[temp, load, oil, vibration]])
-    
-    # พยากรณ์
-    prediction = model.predict(features)[0]
-    prob = model.predict_proba(features)[0][1]
+col1, col2 = st.columns([1, 3])
 
-    # 5. แสดงผลลัพธ์
-    st.subheader("ผลการวิเคราะห์:")
-    if prediction == 1:
-        st.error(f"⚠️ สถานะ: อันตราย! พบความเสี่ยงสูง (โอกาสเสีย {prob*100:.2f}%)")
-        st.markdown("### **คำแนะนำ:** ควรส่งทีมช่างเข้าตรวจสอบอุปกรณ์ทันที")
-    else:
-        st.success(f"✅ สถานะ: ปกติ (โอกาสเสีย {prob*100:.2f}%)")
-        st.markdown("### **คำแนะนำ:** บำรุงรักษาตามรอบปกติ")
+with col1:
+    if st.button("▶️ Start Monitoring"):
+        st.session_state.running = True
+    if st.button("⏹️ Stop"):
+        st.session_state.running = False
 
-    # แสดงแถบความเสี่ยง
-    st.write("ระดับความเสี่ยงพิจารณาจาก AI:")
-    st.progress(prob)
+# 3. พื้นที่แสดงผล Dashboard
+placeholder = st.empty()
+
+while st.session_state.running:
+    with placeholder.container():
+        # จำลองค่า Sensor ที่ไหลเข้ามา (สุ่มค่าในช่วงปกติและเสี่ยง)
+        temp = np.random.uniform(40, 95)
+        load = np.random.uniform(50, 110)
+        oil = np.random.uniform(60, 100)
+        vibration = np.random.uniform(1.0, 5.0)
+
+        # AI ประมวลผลทันที
+        features = np.array([[temp, load, oil, vibration]])
+        prob = model.predict_proba(features)[0][1]
+        
+        # แสดงผล Dashboard
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Temp", f"{temp:.1f} °C", delta=f"{temp-60:.1f}", delta_color="inverse")
+        c2.metric("Load", f"{load:.1f} %")
+        c3.metric("Oil", f"{oil:.1f} %")
+        c4.metric("Vibration", f"{vibration:.2f} mm/s")
+
+        # 4. ระบบ Warning อัตโนมัติ
+        if prob > 0.8:
+            st.error(f"🚨 CRITICAL WARNING: ตรวจพบความเสี่ยงสูง {prob*100:.1f}%")
+            st.toast("ส่งสัญญาณแจ้งเตือนไปยังทีมช่างหน้างานแล้ว!", icon="📢")
+            # ในงานจริงตรงนี้จะใส่คำสั่งส่ง LINE Notify หรือ Email
+        elif prob > 0.5:
+            st.warning(f"⚠️ ATTENTION: เฝ้าระวังเป็นพิเศษ ({prob*100:.1f}%)")
+        else:
+            st.success("✅ System Status: Normal")
+
+        st.progress(prob)
+        time.sleep(3) # รอ 3 วินาทีแล้วดึงค่าใหม่ (Simulate Real-time)
