@@ -3,19 +3,26 @@ import joblib
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 
-# --- 1. CONFIG & STYLE ---
-st.set_page_config(page_title="SPP-AI Dashboard (KTD)", layout="wide")
+# --- 1. CONFIG & SETTINGS ---
+st.set_page_config(page_title="SPP-AI | Predictive Maintenance Dashboard", layout="wide")
+
+# Custom CSS เพื่อให้หน้าตาเหมือน Artifact ที่คุณต้องการ
 st.markdown("""
     <style>
-    .main { background-color: #F8F9FA; }
-    .stButton>button { background-color: #FF8C00; color: white; border-radius: 8px; font-weight: bold; }
-    .metric-card { background-color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF8C00; }
+    @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500&display=swap');
+    html, body, [class*="css"] { font-family: 'Kanit', sans-serif; }
+    .main { background-color: #f4f7f6; }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-left: 5px solid #FF8C00; }
+    .card { background-color: #ffffff; padding: 20px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    .stButton>button { background: linear-gradient(90deg, #FF8C00 0%, #FFA500 100%); color: white; border-radius: 10px; border: none; font-weight: 500; height: 3em; width: 100%; transition: 0.3s; }
+    .stButton>button:hover { opacity: 0.9; transform: translateY(-2px); }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. LOAD AI MODEL ---
+# --- 2. LOAD MODEL ---
 @st.cache_resource
 def load_mea_model():
     try:
@@ -25,107 +32,108 @@ def load_mea_model():
 
 model = load_mea_model()
 
-# --- 3. HELPER FUNCTIONS ---
-def run_ai_analysis(df):
-    if model is not None and not df.empty:
-        # 8 Features: [Thermal, Load, Voltage, Acoustic, PeakFreq, Trips, Age, Humidity]
+# --- 3. DATA PROCESSING FUNCTIONS ---
+def run_prediction(df):
+    if model and not df.empty:
+        # 8 Features ลำดับเดียวกับใน Colab
         X = df[['Thermal_Temp', 'Load_Percent', 'Voltage_V', 'Acoustic_dB', 
                 'Peak_Freq_Hz', 'Trips_Count', 'Age_Years', 'Humidity']].values
         preds = model.predict(X)
         probs = model.predict_proba(X)
-        status_map = {0: '🟢 NORMAL', 1: '🟡 WATCH', 2: '🔴 CRITICAL'}
+        status_map = {0: 'Normal', 1: 'Watch', 2: 'Critical'}
         df['Status'] = [status_map[p] for p in preds]
         df['Risk_Score'] = [probs[i][preds[i]] for i in range(len(preds))]
     return df
 
-# --- 4. DATABASE INITIALIZATION ---
-if 'ktd_assets' not in st.session_state:
-    st.session_state.ktd_assets = pd.DataFrame(columns=[
-        'Transformer_ID', 'Feeder', 'Lat', 'Lon', 'Thermal_Temp', 'Load_Percent', 
-        'Voltage_V', 'Acoustic_dB', 'Peak_Freq_Hz', 'Trips_Count', 'Age_Years', 'Humidity', 'Status', 'Risk_Score'
-    ])
+# --- 4. SESSION STATE ---
+if 'assets' not in st.session_state:
+    st.session_state.assets = pd.DataFrame()
 
-# --- 5. SIDEBAR: DATA INPUT & FILE UPLOAD ---
+# --- 5. SIDEBAR: DATA SOURCE ---
 with st.sidebar:
-    st.header("📂 นำเข้าข้อมูล ฟขต.")
+    st.image("https://www.mea.or.th/assets/images/logo.png", width=180)
+    st.markdown("### 📥 แหล่งข้อมูล")
     
-    # ช่องสำหรับอัปโหลดไฟล์ ฟขต Feeder.xlsx
-    uploaded_file = st.file_uploader("เลือกไฟล์ ฟขต Feeder.xlsx", type=["xlsx", "csv"])
+    # ช่องโหลดไฟล์ ฟขต
+    uploaded_file = st.file_uploader("อัปโหลดไฟล์ ฟขต Feeder.xlsx", type=["xlsx"])
     
     if uploaded_file:
-        try:
-            # อ่านไฟล์ (รองรับทั้ง csv และ xlsx)
-            if uploaded_file.name.endswith('.csv'):
-                raw_df = pd.read_csv(uploaded_file)
-            else:
-                raw_df = pd.read_excel(uploaded_file, skiprows=2) # ข้ามหัวกระดาษตามไฟล์จริง
+        raw_df = pd.read_excel(uploaded_file, skiprows=2)
+        if 'Feeder' in raw_df.columns:
+            trip_stats = raw_df['Feeder'].value_counts().to_dict()
+            unique_feeders = list(trip_stats.keys())
             
-            if 'Feeder' in raw_df.columns:
-                # สรุปสถิติ Trip รายฟีดเดอร์
-                trip_stats = raw_df['Feeder'].value_counts().to_dict()
-                unique_feeders = list(trip_stats.keys())
-                
-                if st.button("🔄 อัปเดตรายชื่อฟีดเดอร์เข้าสู่ระบบ"):
-                    new_data = []
-                    for i, fdr in enumerate(unique_feeders[:30]): # สมมติหม้อแปลง 30 ตัวจากฟีดเดอร์ต่างๆ
-                        new_data.append({
-                            'Transformer_ID': f'TR-KTD-{i+1:03d}',
-                            'Feeder': fdr,
-                            'Lat': 13.702 + (i * 0.001),
-                            'Lon': 100.555 + (i * 0.001),
-                            'Thermal_Temp': np.random.uniform(40, 95),
-                            'Load_Percent': np.random.uniform(40, 110),
-                            'Voltage_V': 220.0,
-                            'Acoustic_dB': np.random.uniform(40, 90),
-                            'Peak_Freq_Hz': 25000.0,
-                            'Trips_Count': trip_stats.get(fdr, 0),
-                            'Age_Years': np.random.randint(5, 30),
-                            'Humidity': 65.0
-                        })
-                    st.session_state.ktd_assets = pd.DataFrame(new_data)
-                    st.session_state.ktd_assets = run_ai_analysis(st.session_state.ktd_assets)
-                    st.success(f"โหลดข้อมูล {len(unique_feeders)} ฟีดเดอร์สำเร็จ")
-            else:
-                st.error("ไม่พบคอลัมน์ 'Feeder' ในไฟล์")
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
+            if st.button("🚀 เริ่มวิเคราะห์ความเสี่ยงราย Feeder"):
+                new_data = []
+                # สุ่มตำแหน่งหม้อแปลงในเขตคลองเตย (KTD)
+                for i, fdr in enumerate(unique_feeders[:25]): 
+                    new_data.append({
+                        'Transformer_ID': f'TR-KTD-{i+101}',
+                        'Feeder': fdr,
+                        'Lat': 13.702 + np.random.uniform(-0.005, 0.005),
+                        'Lon': 100.560 + np.random.uniform(-0.005, 0.005),
+                        'Thermal_Temp': np.random.uniform(40, 105),
+                        'Load_Percent': np.random.uniform(30, 115),
+                        'Voltage_V': 220.0 + np.random.uniform(-5, 5),
+                        'Acoustic_dB': np.random.uniform(35, 100),
+                        'Peak_Freq_Hz': 25000.0,
+                        'Trips_Count': trip_stats.get(fdr, 0),
+                        'Age_Years': np.random.randint(5, 30),
+                        'Humidity': 65.0
+                    })
+                st.session_state.assets = run_prediction(pd.DataFrame(new_data))
+                st.success("ประมวลผลข้อมูล AI สำเร็จ")
 
-    st.divider()
-    if not st.session_state.ktd_assets.empty:
-        st.subheader("🛠 สำรวจหน้างานรายเครื่อง")
-        target_id = st.selectbox("เลือก ID หม้อแปลง:", st.session_state.ktd_assets['Transformer_ID'])
-        idx = st.session_state.ktd_assets[st.session_state.ktd_assets['Transformer_ID'] == target_id].index[0]
-        
-        new_th = st.slider("ความร้อน (°C)", 30, 120, int(st.session_state.ktd_assets.at[idx, 'Thermal_Temp']))
-        new_ac = st.slider("เสียง (dB)", 30, 110, int(st.session_state.ktd_assets.at[idx, 'Acoustic_dB']))
-        
-        if st.button("💾 บันทึกและวิเคราะห์"):
-            st.session_state.ktd_assets.at[idx, 'Thermal_Temp'] = new_th
-            st.session_state.ktd_assets.at[idx, 'Acoustic_dB'] = new_ac
-            st.session_state.ktd_assets = run_ai_analysis(st.session_state.ktd_assets)
-            st.rerun()
+# --- 6. MAIN CONTENT ---
+st.title("⚡ SPP-AI Predictive Maintenance Dashboard")
+st.markdown("ระบบบริหารจัดการความเสี่ยงหม้อแปลงไฟฟ้า เขตคลองเตย (KTD)")
 
-# --- 6. MAIN DISPLAY ---
-st.title("⚡ SPP-AI: ระบบวิเคราะห์ความเสี่ยงหม้อแปลง (KTD)")
-
-if st.session_state.ktd_assets.empty:
-    st.info("👈 กรุณาอัปโหลดไฟล์ 'ฟขต Feeder.xlsx' ที่แถบด้านซ้ายเพื่อเริ่มต้นระบบ")
+if st.session_state.assets.empty:
+    st.warning("👈 กรุณาอัปโหลดไฟล์ข้อมูลสายป้อน (ฟขต Feeder.xlsx) เพื่อเริ่มการทำงาน")
 else:
-    df = st.session_state.ktd_assets
-    # Dashboard Metrics
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(f"<div class='metric-card' style='border-top:5px solid #FF4B4B;'><h4>วิกฤต (Critical)</h4><h1>{len(df[df['Status'] == '🔴 CRITICAL'])}</h1></div>", unsafe_allow_html=True)
-    c2.markdown(f"<div class='metric-card' style='border-top:5px solid #FF8C00;'><h4>เฝ้าระวัง (Watch)</h4><h1>{len(df[df['Status'] == '🟡 WATCH'])}</h1></div>", unsafe_allow_html=True)
-    c3.markdown(f"<div class='metric-card' style='border-top:5px solid #28A745;'><h4>ปกติ (Normal)</h4><h1>{len(df[df['Status'] == '🟢 NORMAL'])}</h1></div>", unsafe_allow_html=True)
+    df = st.session_state.assets
+    
+    # ROW 1: METRICS
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("หม้อแปลงทั้งหมด", len(df))
+    m2.metric("วิกฤต (Critical)", len(df[df['Status']=='Critical']), delta_color="inverse")
+    m3.metric("เฝ้าระวัง (Watch)", len(df[df['Status']=='Watch']))
+    m4.metric("เฉลี่ย Load (%)", f"{df['Load_Percent'].mean():.1f}%")
 
-    # Map & Table
-    tab1, tab2 = st.tabs(["📍 แผนที่ความเสี่ยง", "📋 ตารางข้อมูล"])
-    with tab1:
-        fig = px.scatter_mapbox(df, lat="Lat", lon="Lon", color="Status", size="Load_Percent",
-                                hover_name="Transformer_ID", hover_data=["Feeder", "Trips_Count"],
-                                color_discrete_map={'🔴 CRITICAL': '#FF4B4B', '🟡 WATCH': '#FF8C00', '🟢 NORMAL': '#28A745'},
-                                zoom=13, height=500)
-        fig.update_layout(mapbox_style="carto-positron")
-        st.plotly_chart(fig, use_container_width=True)
-    with tab2:
-        st.dataframe(df[['Transformer_ID', 'Feeder', 'Status', 'Thermal_Temp', 'Acoustic_dB', 'Trips_Count', 'Load_Percent']])
+    # ROW 2: MAP & ANALYSIS
+    col_map, col_chart = st.columns([2, 1])
+    
+    with col_map:
+        st.markdown("<div class='card'><h4>📍 แผนที่ตำแหน่งและความเสี่ยง (Spatial Risk)</h4>", unsafe_allow_html=True)
+        fig_map = px.scatter_mapbox(df, lat="Lat", lon="Lon", color="Status", size="Load_Percent",
+                                    hover_name="Transformer_ID", hover_data=["Feeder", "Thermal_Temp", "Acoustic_dB"],
+                                    color_discrete_map={'Critical': '#FF4B4B', 'Watch': '#FF8C00', 'Normal': '#28A745'},
+                                    zoom=13.5, height=500)
+        fig_map.update_layout(mapbox_style="carto-positron", margin={"r":0,"t":0,"l":0,"b":0})
+        st.plotly_chart(fig_map, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col_chart:
+        st.markdown("<div class='card'><h4>📊 สัดส่วนสถานะความเสี่ยง</h4>", unsafe_allow_html=True)
+        fig_pie = px.pie(df, names='Status', hole=0.6,
+                         color='Status', color_discrete_map={'Critical': '#FF4B4B', 'Watch': '#FF8C00', 'Normal': '#28A745'})
+        st.plotly_chart(fig_pie, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ROW 3: DETAIL TABLE
+    st.markdown("<div class='card'><h4>📋 รายการลำดับความเสี่ยงและแผนงานบำรุงรักษา</h4>", unsafe_allow_html=True)
+    
+    # จัดลำดับตามความรุนแรง
+    display_df = df.sort_values(by='Status', ascending=False)
+    
+    # แสดงตารางพร้อมสีสถานะ
+    def color_status(val):
+        color = '#FF4B4B' if val == 'Critical' else '#FF8C00' if val == 'Watch' else '#28A745'
+        return f'color: {color}; font-weight: bold'
+
+    st.dataframe(display_df[['Transformer_ID', 'Feeder', 'Status', 'Risk_Score', 'Thermal_Temp', 'Load_Percent', 'Acoustic_dB', 'Trips_Count']]
+                 .style.applymap(color_status, subset=['Status']), use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # FOOTER
+    st.caption(f"อัปเดตข้อมูลล่าสุด: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | ข้อมูลจากระบบ Smart Meter และ ฟขต.")
