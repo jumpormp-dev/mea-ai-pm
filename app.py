@@ -24,147 +24,152 @@ if 'ktd_assets' not in st.session_state:
     st.session_state.ktd_assets = pd.DataFrame({
         'Transformer_ID': [f'TR-KTD-{i:03d}' for i in range(1, 21)],
         'Feeder': ktd_feeders[:20],
-        'Lat': np.random.uniform(13.70, 13.72, 20),
-        'Lon': np.random.uniform(100.55, 100.58, 20),
-        'Temp_Meter': np.random.uniform(50, 70, 20),
-        'Load_Meter': np.random.uniform(40, 80, 20),
+        'Lat': np.random.uniform(13.702, 13.715, 20),
+        'Lon': np.random.uniform(100.555, 100.575, 20),
+        'Temp_Meter': [0.0]*20,
+        'Load_Meter': [0.0]*20,
         'Trips_KTD': [0]*20,
         'Risk_Score': [0.1]*20,
         'Status': ['🟢 NORMAL']*20,
         'Age': np.random.randint(5, 30, 20),
         'Acoustic_dB': [45.0]*20,
         'Peak_Hz': [20000]*20,
-        'Last_PM': [(datetime.now() - timedelta(days=np.random.randint(30, 300))).strftime('%d/%m/%Y') for _ in range(20)]
+        'Last_Update': ['-']*20
     })
 
-# --- 3. UI TABS NAVIGATION ---
+# --- 3. SIDEBAR: DATA UPLOAD CHANNELS (ช่องทางการอัปโหลดข้อมูล) ---
+st.sidebar.header("📥 Data Management Center")
+
+# ช่องทางที่ 1: Sync Smart Meter (API จำลอง)
+st.sidebar.subheader("1. Smart Meter Sync")
+if st.sidebar.button("📡 Sync KTD Meter (172.16.111.184)"):
+    st.session_state.ktd_assets['Temp_Meter'] = np.random.uniform(50, 95, 20)
+    st.session_state.ktd_assets['Load_Meter'] = np.random.uniform(40, 120, 20)
+    st.session_state.ktd_assets['Last_Update'] = datetime.now().strftime('%H:%M:%S')
+    st.sidebar.success("✅ เชื่อมต่อมิเตอร์อัจฉริยะสำเร็จ")
+
+# ช่องทางที่ 2: อัปโหลดไฟล์ Reliability (ฟขต. / KTD)
+st.sidebar.subheader("2. Reliability Data (Excel)")
+feeder_file = st.sidebar.file_uploader("เลือกไฟล์สถิติไฟดับ ฟขต.", type=["xlsx"])
+if feeder_file:
+    df_f = pd.read_excel(feeder_file, skiprows=2)
+    counts = df_f['Feeder'].value_counts().to_dict()
+    for fid, c in counts.items():
+        st.session_state.ktd_assets.loc[st.session_state.ktd_assets['Feeder'] == fid, 'Trips_KTD'] = c
+    st.session_state.raw_feeder_df = df_f 
+    st.sidebar.success("✅ อัปเดตข้อมูลรายฟีดเดอร์แล้ว")
+
+# ช่องทางที่ 3: บันทึกผลสำรวจ Acoustic (Manual Input)
+st.sidebar.subheader("3. Field Survey (Acoustic)")
+target = st.sidebar.selectbox("รหัสหม้อแปลง:", st.session_state.ktd_assets['Transformer_ID'])
+ac_db_in = st.sidebar.number_input("ค่าความดัง (dB)", 30.0, 120.0, 45.0)
+ac_hz_in = st.sidebar.number_input("ความถี่ Peak (Hz)", 1000, 100000, 20000)
+
+if st.sidebar.button("🧠 AI Analyze & Update"):
+    idx = st.session_state.ktd_assets[st.session_state.ktd_assets['Transformer_ID'] == target].index[0]
+    row = st.session_state.ktd_assets.iloc[idx]
+    
+    # Input 8 Features ให้โมเดล
+    features = np.array([[row['Temp_Meter'], row['Load_Meter'], 230.0, ac_db_in, ac_hz_in, row['Trips_KTD'], row['Age'], 55.0]])
+    prob = model.predict_proba(features)[0][1]
+    
+    # อัปเดตสถานะ
+    new_stat = "🔴 CRITICAL" if (prob > 0.75 or row['Trips_KTD'] >= 8) else "🟡 WATCH" if (prob > 0.4) else "🟢 NORMAL"
+    st.session_state.ktd_assets.at[idx, 'Status'] = new_stat
+    st.session_state.ktd_assets.at[idx, 'Risk_Score'] = prob
+    st.session_state.ktd_assets.at[idx, 'Acoustic_dB'] = ac_db_in
+    st.session_state.ktd_assets.at[idx, 'Peak_Hz'] = ac_hz_in
+    st.sidebar.success(f"วิเคราะห์ {target} เรียบร้อย!")
+
+# --- 4. MAIN NAVIGATION (TABS) ---
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Executive Dashboard", 
-    "🔍 Transformer Detail & Diagnostics", 
-    "📅 Predictive Action Plan", 
-    "⚙️ System & AI Settings"
+    "🔍 Transformer Detail", 
+    "📅 Action Plan", 
+    "⚙️ Settings"
 ])
 
+# 
 # ---------------------------------------------------------
 # TAB 1: EXECUTIVE DASHBOARD
 # ---------------------------------------------------------
 with tab1:
-    st.header("🏙️ KTD Smart City Executive Overview")
+    st.header("🏙️ SPP-AI: KTD Smart City Dashboard")
     
-    # Overview Summary Cards
+    # Summary Cards
     c1, c2, c3, c4 = st.columns(4)
-    total = len(st.session_state.ktd_assets)
     crit = len(st.session_state.ktd_assets[st.session_state.ktd_assets['Status'] == "🔴 CRITICAL"])
     watch = len(st.session_state.ktd_assets[st.session_state.ktd_assets['Status'] == "🟡 WATCH"])
     
-    c1.metric("หม้อแปลงทั้งหมด", f"{total} เครื่อง")
-    c2.metric("🔴 CRITICAL", f"{crit} เครื่อง")
-    c3.metric("🟡 WATCH", f"{watch} เครื่อง")
-    c4.metric("🟢 NORMAL", f"{total-crit-watch} เครื่อง")
+    c1.metric("หม้อแปลงทั้งหมด", "20 ตัว")
+    c2.metric("🔴 CRITICAL", f"{crit} ตัว", delta="ด่วนที่สุด", delta_color="inverse")
+    c3.metric("🟡 WATCH", f"{watch} ตัว")
+    c4.metric("🟢 NORMAL", f"{20-crit-watch} ตัว")
 
     col_map, col_list = st.columns([2, 1])
-    
     with col_map:
-        st.write("### 📍 GIS Risk Map (เขตคลองเตย)")
+        st.write("### 📍 GIS Risk Map")
         color_map = {'🔴 CRITICAL': 'red', '🟡 WATCH': 'orange', '🟢 NORMAL': 'green'}
         fig_map = px.scatter_mapbox(st.session_state.ktd_assets, lat="Lat", lon="Lon", 
                                     color="Status", size="Risk_Score",
-                                    color_discrete_map=color_map,
-                                    zoom=13, height=500, mapbox_style="carto-positron",
-                                    hover_name="Transformer_ID")
+                                    color_discrete_map=color_map, zoom=13, height=450,
+                                    mapbox_style="carto-positron")
         st.plotly_chart(fig_map, use_container_width=True)
-
     with col_list:
-        st.write("### 🚨 Top Urgent List (ภายใน 7 วัน)")
-        urgent_df = st.session_state.ktd_assets.sort_values('Risk_Score', ascending=False).head(5)
-        for _, row in urgent_df.iterrows():
-            days = int(max(2, (1 - row['Risk_Score']) * 90))
-            st.warning(f"**{row['Transformer_ID']}** (Risk: {row['Risk_Score']*100:.1f}%) \n\n PM ภายใน: {days} วัน")
+        st.write("### 🚨 Top Urgent List")
+        st.dataframe(st.session_state.ktd_assets.sort_values('Risk_Score', ascending=False)[['Transformer_ID', 'Status']].head(5), hide_index=True)
 
 # ---------------------------------------------------------
-# TAB 2: TRANSFORMER DETAIL & DIAGNOSTICS (Explainability)
+# TAB 2: TRANSFORMER DETAIL (Explainability)
 # ---------------------------------------------------------
 with tab2:
-    st.header("🔍 AI Diagnostic Analysis")
-    col_sel, col_sync = st.columns([2, 1])
-    with col_sel:
-        target_id = st.selectbox("เลือกหม้อแปลงที่ต้องการตรวจสอบ:", st.session_state.ktd_assets['Transformer_ID'])
-    with col_sync:
-        if st.button("📡 Sync Real-time Data"):
-            st.toast("กำลังดึงข้อมูลจาก IP 172.16.111.184...")
+    st.header("🔍 Deep Diagnostics & AI Insights")
+    sel_id = st.selectbox("เลือกหม้อแปลงที่ต้องการตรวจสอบ:", st.session_state.ktd_assets['Transformer_ID'])
+    res = st.session_state.ktd_assets[st.session_state.ktd_assets['Transformer_ID'] == sel_id].iloc[0]
 
-    res = st.session_state.ktd_assets[st.session_state.ktd_assets['Transformer_ID'] == target_id].iloc[0]
-    
-    # Gauge & Countdown
     d1, d2, d3 = st.columns([1, 1, 1.5])
     with d1:
-        fig_gauge = go.Figure(go.Indicator(
-            mode = "gauge+number", value = res['Risk_Score']*100,
-            title = {'text': "Risk Score (%)"},
-            gauge = {'axis': {'range': [0, 100]},
-                     'bar': {'color': "red" if res['Risk_Score'] > 0.7 else "orange"},
-                     'steps': [{'range': [0, 40], 'color': "green"}, {'range': [40, 75], 'color': "yellow"}]}))
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.write("**Risk Score Gauge**")
+        fig_g = go.Figure(go.Indicator(mode="gauge+number", value=res['Risk_Score']*100, gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "red" if res['Risk_Score'] > 0.7 else "orange"}}))
+        fig_g.update_layout(height=300)
+        st.plotly_chart(fig_g, use_container_width=True)
     with d2:
-        days_rem = int(max(2, (1 - res['Risk_Score']) * 90))
-        st.markdown(f"<h3 style='text-align: center;'>Remaining Days</h3>", unsafe_allow_html=True)
-        st.markdown(f"<h1 style='text-align: center; color: red;'>{days_rem} วัน</h1>", unsafe_allow_html=True)
+        days = int(max(2, (1 - res['Risk_Score']) * 90))
+        st.markdown(f"<h3 style='text-align: center;'>Remaining Days</h3><h1 style='text-align: center; color: red; font-size: 70px;'>{days}</h1>", unsafe_allow_html=True)
     with d3:
         st.info("#### 🤖 AI Logic Insights")
-        if res['Risk_Score'] > 0.4:
-            st.write(f"**เหตุผล:** ตรวจพบ Pattern เสียง Acoustic ({res['Acoustic_dB']} dB) ที่ความถี่สูงร่วมกับสถิติไฟดับสะสมในฟีดเดอร์ {res['Feeder']} แม้ Load จะยังไม่เกินเกณฑ์")
-        else:
-            st.write("**เหตุผล:** พารามิเตอร์ทั้งหมดอยู่ในเกณฑ์มาตรฐานตามโมเดลพยากรณ์")
+        st.write(f"**Pattern:** พบความเสี่ยงจากเสียง {res['Acoustic_dB']}dB ร่วมกับสถิติไฟดับใน {res['Feeder']} ({res['Trips_KTD']} ครั้ง)")
 
-    # Monitoring Graphs
     st.write("---")
-    g1, g2, g3 = st.columns(3)
-    with g1:
-        st.write("**📡 Smart Meter (Historical Temp/Load)**")
-        chart_data = pd.DataFrame(np.random.randn(20, 2), columns=['Temp', 'Load'])
-        st.line_chart(chart_data)
-    with g2:
-        st.write("**🔊 Acoustic Spectrum**")
-        if res['Acoustic_dB'] > 70: st.markdown("<p style='color:red;'>⚠️ High Intensity Detected</p>", unsafe_allow_html=True)
-        st.bar_chart(np.random.rand(10))
-    with g3:
-        st.write("**📜 Contextual & Reliability**")
-        st.write(f"อายุ: {res['Age']} ปี | ไฟดับ KTD: {res['Trips_KTD']} ครั้ง")
-        st.write(f"บำรุงรักษาล่าสุด: {res['Last_PM']}")
+    m1, m2, m3 = st.columns(3)
+    m1.write("**📡 Smart Meter (Temp/Load)**")
+    m1.line_chart(np.random.randn(10, 2))
+    m2.write("**🔊 Acoustic Peak**")
+    m2.bar_chart(np.random.rand(10))
+    m3.write("**📜 Reliability Data**")
+    m3.write(f"Feeder: {res['Feeder']} | อายุ: {res['Age']} ปี")
 
 # ---------------------------------------------------------
-# TAB 3: PREDICTIVE ACTION PLAN
+# TAB 3: ACTION PLAN
 # ---------------------------------------------------------
 with tab3:
-    st.header("📅 Maintenance Task Management")
-    c_f1, c_f2, c_f3 = st.columns(3)
-    f_feeder = c_f1.multiselect("Filter Feeder", st.session_state.ktd_assets['Feeder'].unique())
-    f_stat = c_f2.multiselect("Filter Status", ["🔴 CRITICAL", "🟡 WATCH", "🟢 NORMAL"])
-    
-    st.write("### Current Work Orders")
+    st.header("📅 Maintenance Work Orders")
     for idx, row in st.session_state.ktd_assets.iterrows():
         if row['Status'] != '🟢 NORMAL':
-            with st.expander(f"{row['Status']} - {row['Transformer_ID']} (Feeder: {row['Feeder']})"):
-                col_btn1, col_btn2, col_btn3 = st.columns(3)
-                if col_btn1.button("Create Work Order", key=f"wo_{idx}"): st.success("ส่งข้อมูลเข้า SAP/EAM แล้ว")
-                if col_btn2.button("Schedule Thermo Scan", key=f"ts_{idx}"): st.info("ลงคิวตรวจสอบทีมบำรุงรักษา")
-                if col_btn3.button("Mark as Resolved", key=f"re_{idx}"):
+            with st.expander(f"{row['Status']} | {row['Transformer_ID']}"):
+                b1, b2 = st.columns(2)
+                if b1.button("Create Work Order", key=f"b1_{idx}"): st.success("สั่งงานแล้ว")
+                if b2.button("✅ Mark as Resolved", key=f"b2_{idx}"):
                     st.session_state.ktd_assets.at[idx, 'Status'] = '🟢 NORMAL'
                     st.session_state.ktd_assets.at[idx, 'Risk_Score'] = 0.05
                     st.rerun()
 
 # ---------------------------------------------------------
-# TAB 4: SYSTEM & MODEL SETTINGS
+# TAB 4: SYSTEM SETTINGS
 # ---------------------------------------------------------
 with tab4:
-    st.header("⚙️ System Configuration")
-    col_set1, col_set2 = st.columns(2)
-    with col_set1:
-        st.write("#### AI Model Tuning")
-        st.slider("Age Penalty (Days to reduce if > 25 yrs)", 0, 30, 15)
-        st.slider("Acoustic Weight Importance", 0.1, 1.0, 0.8)
-    with col_set2:
-        st.write("#### Sensor Connectivity")
-        st.success("🟢 Smart Meter API: Connected (172.16.111.184)")
-        st.success("🟢 Acoustic Camera Node: Online")
-        st.write(f"Last Model Update: {datetime.now().strftime('%Y-%m-%d')}")
+    st.header("⚙️ AI Model & Sensor Health")
+    s1, s2 = st.columns(2)
+    s1.slider("Age Penalty (Days)", 0, 30, 15)
+    s2.write("#### 🩺 Sensor Health")
+    s2.write("🟢 Smart Meter: Online | 🟢 Acoustic: Online")
